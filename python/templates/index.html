@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>手寫表格校對</title>
+<style>
+body{font-family:system-ui;margin:24px;background:#f6f8fa;color:#182637}button,input{font:inherit;padding:7px}button{cursor:pointer;margin:6px}button:disabled{cursor:wait}section{background:white;padding:18px;margin:16px 0;border-radius:8px}canvas{max-width:100%;height:auto;cursor:crosshair}img{max-width:100%}.scroll{overflow:auto;max-height:600px}table{border-collapse:collapse}td,th{border:1px solid #ccd4df;padding:3px}td input{width:105px;border:0}.uncertain{background:#fff1cc}.workspace{display:grid;grid-template-columns:minmax(250px,1fr) minmax(250px,2fr);gap:16px}#status{white-space:pre-wrap}label{display:inline-block;margin:6px}@media(max-width:800px){.workspace{display:block}}
+</style>
+<h1>手寫表格校對</h1><p>固定格式實驗：確認切格後辨識，再人工校對與匯出。黃色代表信心低於 0.85 或未讀出文字；其他格子也需要核對。</p>
+<section><input id="photo" type="file" accept="image/*"><button id="upload">上傳照片</button><p id="status" role="status">請選擇照片。</p></section>
+<section><label>已儲存的校對<select id="savedReviews"><option value="">選擇校對紀錄</option></select></label><button id="refreshReviews">更新清單</button><button id="resume">繼續校對</button><p>只列出已按儲存或匯出的本機紀錄。</p></section>
+<section id="setup" hidden><h2>1. 確認資料區</h2><p>程式會先建議資料區。拖曳四個紅色控制點調整選區；順序不限。排除標題與表頭，包含資料區的完整外框格線，角點選在外框稍外側。也可以清除角點後重新點選。</p><button id="suggest">恢復自動建議</button><button id="reset">清除角點重新選取</button><canvas id="canvas"></canvas><button id="preview">產生切格預覽</button><img id="previewImage" hidden><p>檢查紅色格號與綠色框線。綠線代表橫線、藍線代表直線；若漏格或錯位，重新選資料區後產生預覽；紙張彎曲可能需要重新拍攝。</p><label>第一筆資料在預覽第幾列？<input id="firstRow" type="number" min="1" value="1"></label><p>紅色數字是列號。若包含標題與表頭，請選第一筆手寫資料的列號，前面的列不會匯出。</p><p id="gridReason" role="status">請先產生切格預覽。</p><button id="recognize" disabled>選區確認，辨識文字</button></section>
+<section id="review" hidden><h2>2. 人工校對</h2><p>直接修改表格格子。使用 ↑／↓／←／→ 移到相鄰格，移動後文字會全選。Ctrl+C 複製選取文字，Ctrl+V 貼上；點選格子後也可用 Ctrl+A 全選。Shift+←／→ 可選取格內文字。點選文字可對照原圖；黃色格子需特別核對。日期保留原文。修改後按儲存即可保存校對答案與確認樣本；需要時再另外匯出 Excel。</p><label>員工代號（選填）<input id="employee" maxlength="80"></label><button id="confirmAll">我已逐格核對，標記全部確認</button><p>每格勾選代表你已核對正確，修改文字會勾選該格。只有確認且位置可靠的格子才保存為訓練樣本；尚未執行模型訓練。</p><div class="workspace"><div><img id="source"><canvas id="cellView"></canvas><p id="cellInfo"></p></div><div class="scroll"><table id="table"></table></div></div><button id="save">儲存校對結果與樣本</button><button id="export">匯出 Excel（選用）</button></section>
+<script>
+const headers={{ headers|tojson }}, $=id=>document.getElementById(id);
+let reviewMode="cells",job,corners=[],photo=new Image(),gridImage=new Image(),cells=[],busy=false,gridReady=false, suggestedCorners=[],dragIndex=-1;
+function status(text){$('status').textContent=text}
+async function api(url,options={}){const r=await fetch(url,options);if(!r.ok){let d=await r.json().catch(()=>({error:'操作失敗'}));throw Error(d.error||'操作失敗')}return r}
+function post(data){return {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}}
+async function action(fn){if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);try{await fn()}catch(e){status(e.message)}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);$('recognize').disabled=!gridReady}}
+function invalidate(){ gridReady=false; $('gridReason').textContent='選區已變更，請重新產生切格預覽。'; $('previewImage').hidden=true;$('recognize').disabled=true;$('review').hidden=true }
+function draw(){const c=$('canvas'),ctx=c.getContext('2d');c.width=photo.width;c.height=photo.height;ctx.drawImage(photo,0,0);if(corners.length===4){ctx.strokeStyle='#ef4444';ctx.lineWidth=3;ctx.beginPath();corners.forEach((p,i)=>i?ctx.lineTo(...p):ctx.moveTo(...p));ctx.closePath();ctx.stroke()}corners.forEach((p,i)=>{ctx.fillStyle='red';ctx.beginPath();ctx.arc(p[0],p[1],7,0,7);ctx.fill();ctx.font='24px sans-serif';ctx.fillText(i+1,p[0]+10,p[1]+20)})}
+$('upload').onclick=()=>action(async()=>{const file=$('photo').files[0];if(!file)throw Error('請選擇照片');const f=new FormData();f.append('photo',file);status('正在讀取與裁切照片…');const d=await (await api('/upload',{method:'POST',body:f})).json();job=d.job;suggestedCorners=d.corners;corners=d.corners.map(p=>[...p]);invalidate();photo.onload=draw;photo.src=`/image/${job}/document.png`;$('setup').hidden=false;status('已提供選區建議。可拖曳紅色角點調整，確認排除表頭並保留外框。')});
+function pointer(e){const r=$('canvas').getBoundingClientRect();return [Math.max(0,Math.min(photo.width-1,(e.clientX-r.left)*photo.width/r.width)),Math.max(0,Math.min(photo.height-1,(e.clientY-r.top)*photo.height/r.height))]}
+$('canvas').style.touchAction='none';
+$('canvas').onpointerdown=e=>{if(busy)return;const p=pointer(e),r=$('canvas').getBoundingClientRect(),radius=24*photo.width/r.width;dragIndex=corners.findIndex(c=>Math.hypot(c[0]-p[0],c[1]-p[1])<radius);if(dragIndex<0&&corners.length<4){corners.push(p);dragIndex=corners.length-1}if(dragIndex>=0){e.preventDefault();$('canvas').setPointerCapture(e.pointerId);invalidate();draw()}};
+$('canvas').onpointermove=e=>{if(dragIndex<0||busy)return;corners[dragIndex]=pointer(e);draw()};
+$('canvas').onpointerup=$('canvas').onpointercancel=()=>{dragIndex=-1};
+$('suggest').onclick=()=>{corners=suggestedCorners.map(p=>[...p]);invalidate();draw()};
+$('reset').onclick=()=>{corners=[];invalidate();draw()};
+
+$('preview').onclick=()=>action(async()=>{if(corners.length!==4)throw Error('請先選四個角');invalidate();const d=await (await api(`/grid/${job}`,post({corners}))).json();$('previewImage').src=`/image/${job}/preview.png?t=${Date.now()}`;$('previewImage').hidden=false;gridReady=d.ok;$('firstRow').max=d.rows||60;$('gridReason').textContent=d.ok?d.message:d.error;status(d.ok?`偵測到 ${d.rows} 列、${d.diagnostics.vertical_lines} 條直線。${d.message} 請確認第一筆資料列號。`:d.error+`（橫線 ${d.diagnostics.horizontal_lines}、直線 ${d.diagnostics.vertical_lines}）`)});
+function renderReview(d){reviewMode=d.mode||'cells';cells=d.cells;$('employee').value=d.employee_id||'';const table=$('table');table.replaceChildren();let tr=table.insertRow();headers.forEach(h=>{let th=document.createElement('th');th.textContent=h;tr.append(th)});for(let row=0;row<d.rows;row++){tr=table.insertRow();cells.filter(c=>c.row===row).forEach(c=>{const td=tr.insertCell(),input=document.createElement('input');input.value=c.text;input.dataset.index=cells.indexOf(c);input.setAttribute('aria-label',`第 ${row+1} 列 ${headers[c.col]}`);if(c.confidence<.85||c.warning)input.className='uncertain';input.title=c.warning||'';input.onfocus=()=>{const [x1,y1,x2,y2]=c.bbox,cv=$('cellView');cv.width=x2-x1;cv.height=y2-y1;cv.getContext('2d').drawImage(gridImage,x1,y1,x2-x1,y2-y1,0,0,cv.width,cv.height);$('cellInfo').textContent=`原始：${c.original||'未讀出'}；信心：${c.confidence.toFixed(2)} ${c.warning||''}`};const check=document.createElement('input');check.type='checkbox';check.className='confirmed';check.dataset.index=cells.indexOf(c);check.style.width='auto';check.title='已核對正確';check.checked=d.confirmed?.[cells.indexOf(c)]===true;input.oninput=()=>check.checked=true;td.append(input,check)})}$('review').hidden=false;status(`辨識完成，可直接改格子。${d.unplaced?.length||0} 筆無法定位文字保留在匯出工作表；黃色位置需核對。`)}
+function loadImage(target,url){return new Promise((resolve,reject)=>{target.onload=resolve;target.onerror=()=>reject(Error('無法載入校對圖片'));target.src=url})}
+async function displayReview(d){await loadImage(gridImage,`/image/${job}/grid.png?t=${Date.now()}`);$('source').src=gridImage.src;renderReview(d)}
+$('recognize').onclick=()=>action(async()=>{status('正在辨識文字，CPU 處理可能需要數分鐘…');const d=await (await api(`/recognize/${job}`,post({first_row:Number($('firstRow').value),mode:"table"}))).json();await displayReview(d)});
+async function refreshReviews(){const d=await (await api('/reviews')).json();const select=$('savedReviews');select.replaceChildren();const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='選擇校對紀錄';select.append(placeholder);d.reviews.forEach(r=>{const option=document.createElement('option');option.value=r.job;option.textContent=`${new Date(r.saved_at*1000).toLocaleString()} · ${r.rows} 列 · ${r.job.slice(0,8)}`;select.append(option)})}
+$('refreshReviews').onclick=()=>action(refreshReviews);
+$('resume').onclick=()=>action(async()=>{const selected=$('savedReviews').value;if(!selected)throw Error('請先選擇已儲存的校對');if(!$('review').hidden&&!window.confirm('載入另一筆會取代目前畫面。尚未儲存的修改會遺失，確定繼續？'))return;const d=await (await api(`/review/${selected}`)).json();job=d.job;corners=d.corners.map(p=>[...p]);suggestedCorners=corners.map(p=>[...p]);await loadImage(photo,`/image/${job}/document.png`);draw();$('setup').hidden=false;$('previewImage').src=`/image/${job}/preview.png?t=${Date.now()}`;$('previewImage').hidden=false;$('firstRow').value=d.first_row;$('firstRow').max=d.grid_rows;gridReady=true;$('gridReason').textContent='已恢復儲存時的選區與校對，不需要重新辨識。';await displayReview(d);status('已恢復校對文字、確認勾選與員工代號。可以接續修改並儲存。')});
+refreshReviews().catch(e=>status(e.message));
+
+function showEntry(c){const [x1,y1,x2,y2]=c.bbox,cv=$('cellView');cv.width=x2-x1;cv.height=y2-y1;cv.getContext('2d').drawImage(gridImage,x1,y1,x2-x1,y2-y1,0,0,cv.width,cv.height);$('cellInfo').textContent=`原始：${c.original}；${c.warning||''} 信心 ${c.confidence.toFixed(2)}`}
+$('table').addEventListener('keydown',event=>{
+    const input=event.target;
+    if(event.isComposing||event.ctrlKey||event.altKey||event.metaKey||event.shiftKey||
+       !input.matches('input[data-index]:not([type=checkbox])')||
+       !['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
+    event.preventDefault();
+    const current=cells[Number(input.dataset.index)];
+    const row=current.row+(event.key==='ArrowDown'?1:event.key==='ArrowUp'?-1:0);
+    const col=current.col+(event.key==='ArrowRight'?1:event.key==='ArrowLeft'?-1:0);
+    const index=cells.findIndex(cell=>cell.row===row&&cell.col===col);
+    if(index<0)return;
+    const next=$('table').querySelector(`input[data-index="${index}"]:not([type=checkbox])`);
+    if(next){next.focus();next.select();next.scrollIntoView({block:'nearest',inline:'nearest'})}
+});
+$('confirmAll').onclick=()=>document.querySelectorAll('.confirmed').forEach(c=>c.checked=true);
+function reviewPayload(){const inputs=[...$('table').querySelectorAll('input[data-index]:not([type=checkbox])')];return {texts:inputs.map(i=>i.value),confirmed:[...$('table').querySelectorAll('.confirmed')].map(i=>i.checked),employee_id:$('employee').value}}
+$('save').onclick=()=>action(async()=>{const d=await (await api(`/save/${job}`,post(reviewPayload()))).json();status(`校對結果已保存：${d.samples} 個確認樣本，其中 ${d.nonblank_samples||0} 個有字。沒有匯出 Excel，模型尚未訓練。`);await refreshReviews()});
+$('export').onclick=()=>action(async()=>{const r=await api(`/export/${job}`,post(reviewPayload()));const url=URL.createObjectURL(await r.blob()),a=document.createElement('a');a.href=url;a.download='reviewed-form.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('Excel 已匯出，當前校對結果也已保存。')});
+</script></html>

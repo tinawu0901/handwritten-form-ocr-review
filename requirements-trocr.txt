@@ -1,0 +1,8 @@
+# Install the CPU PyTorch wheel separately from https://download.pytorch.org/whl/cpu
+torch==2.8.0
+transformers==4.57.1
+sentencepiece==0.2.1
+protobuf==5.29.5
+numpy==1.26.4
+Pillow==11.3.0
+opencv-python-headless==4.11.0.86

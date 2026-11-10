@@ -1,0 +1,11 @@
+# Keep the PPStructure API used by the original experiments.
+paddlepaddle==2.6.2
+paddleocr==2.9.1
+numpy==1.26.4
+openpyxl==3.1.5
+premailer==3.10.0
+Flask==3.1.2
+setuptools==75.8.0
+opencv-python==4.11.0.86
+opencv-contrib-python==4.11.0.86
+opencv-python-headless==4.11.0.86

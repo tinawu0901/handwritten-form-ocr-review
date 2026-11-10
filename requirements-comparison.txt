@@ -1,0 +1,4 @@
+# Optional isolated environment for pretrained-model comparison only.
+paddlepaddle==3.2.2
+paddleocr==3.3.2
+numpy==1.26.4

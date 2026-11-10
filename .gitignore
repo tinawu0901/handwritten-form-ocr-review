@@ -1,0 +1,42 @@
+# Python environment and caches
+.venv/
+.venv-compare/
+.venv-train/
+.venv-trocr/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Downloaded models and generated runs
+.models/
+runs/
+# Local photographs, annotations and historical generated results
+/data/
+/raw_image*/
+/proceess_image*/
+/output/
+/output*.html
+/PPLabel.txt
+/scanned.jpg
+/tamplate.jpg
+/tamplate1.xlsx
+/PaddleOCR/
+/python/haarcascade_frontalface_default.xml
+# Local settings and AI working files
+.env
+AGENTS.md
+.codex/
+codex-notes.md
+ai-notes.md
+
+# Secrets and machine-specific settings
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,6 @@
+# Tests and synthetic demo generation; no OCR model downloads required.
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
+openpyxl==3.1.5
+Flask==3.1.2
+PyYAML==6.0.2
